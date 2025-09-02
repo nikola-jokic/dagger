@@ -46,7 +46,8 @@ func (s *hostSchema) Install(srv *dagql.Server) {
 
 		dagql.Func("_builtinContainer", func(ctx context.Context, parent *core.Query, args struct {
 			Digest string `doc:"Digest of the image manifest"`
-		}) (*core.Container, error) {
+		},
+		) (*core.Container, error) {
 			st := llb.OCILayout(
 				fmt.Sprintf("dagger/import@%s", args.Digest),
 				llb.OCIStore("", buildkit.BuiltinContentOCIStoreName),

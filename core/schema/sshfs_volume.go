@@ -2,7 +2,6 @@ package schema
 
 import (
 	"context"
-	"errors"
 
 	"github.com/dagger/dagger/core"
 	"github.com/dagger/dagger/dagql"
@@ -21,7 +20,9 @@ func (s *sshfsVolumeSchema) Install(srv *dagql.Server) {
 		dagql.NodeFunc("sshfsVolume", s.sshfsVolume).
 			Doc("Constructs a sshfsVolume volume for a given sshfsVolume key.").
 			Args(
-				dagql.Arg("key").Doc(`A string identifier to target this sshfsVolume volume (e.g., "modules-sshfsVolume").`),
+				dagql.Arg("endpoint").Doc("The sshfs endpoint, in the form user@host:/path/to/dir"),
+				dagql.Arg("privateKey").Doc("The private key to use for authentication.").Sensitive(),
+				dagql.Arg("publicKey").Doc("The public key to use for authentication."),
 			),
 	}.Install(srv)
 
@@ -33,43 +34,11 @@ func (s *sshfsVolumeSchema) Dependencies() []SchemaResolvers {
 }
 
 type sshfsVolumeArgs struct {
-	Key       string
-	Namespace string `internal:"true" default:""`
+	Endpoint   string
+	PrivateKey core.Secret
+	PublicKey  string
 }
 
 func (s *sshfsVolumeSchema) sshfsVolume(ctx context.Context, parent dagql.ObjectResult[*core.Query], args sshfsVolumeArgs) (dagql.Result[*core.SSHFSVolume], error) {
-	var inst dagql.Result[*core.SSHFSVolume]
-
-	srv, err := core.CurrentDagqlServer(ctx)
-	if err != nil {
-		return inst, err
-	}
-
-	if args.Namespace != "" {
-		return dagql.NewResultForCurrentID(ctx, core.NewSSHFSVolume(args.Namespace+":"+args.Key))
-	}
-
-	m, err := parent.Self().CurrentModule(ctx)
-	if err != nil && !errors.Is(err, core.ErrNoCurrentModule) {
-		return inst, err
-	}
-	namespaceKey := namespaceFromModule(m)
-	err = srv.Select(ctx, srv.Root(), &inst, dagql.Selector{
-		Field: "sshfsVolume",
-		Args: []dagql.NamedInput{
-			{
-				Name:  "key",
-				Value: dagql.NewString(args.Key),
-			},
-			{
-				Name:  "namespace",
-				Value: dagql.NewString(namespaceKey),
-			},
-		},
-	})
-	if err != nil {
-		return inst, err
-	}
-
-	return inst, nil
+	panic("not implemented")
 }
