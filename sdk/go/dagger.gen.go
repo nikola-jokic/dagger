@@ -253,6 +253,9 @@ type PortID string
 // The `SDKConfigID` scalar type represents an identifier for an object of type SDKConfig.
 type SDKConfigID string
 
+// The `SSHFSVolumeID` scalar type represents an identifier for an object of type SSHFSVolume.
+type SSHFSVolumeID string
+
 // The `ScalarTypeDefID` scalar type represents an identifier for an object of type ScalarTypeDef.
 type ScalarTypeDefID string
 
@@ -445,6 +448,15 @@ func (r *Binding) AsModuleSource() *ModuleSource {
 	q := r.query.Select("asModuleSource")
 
 	return &ModuleSource{
+		query: q,
+	}
+}
+
+// Retrieve the binding value, as type SSHFSVolume
+func (r *Binding) AsSSHFSVolume() *SSHFSVolume {
+	q := r.query.Select("asSSHFSVolume")
+
+	return &SSHFSVolume{
 		query: q,
 	}
 }
@@ -2089,6 +2101,44 @@ func (r *Container) WithMountedFile(path string, source *File, opts ...Container
 	}
 	q = q.Arg("path", path)
 	q = q.Arg("source", source)
+
+	return &Container{
+		query: q,
+	}
+}
+
+// ContainerWithMountedSSHFSVolumeOpts contains options for Container.WithMountedSSHFSVolume
+type ContainerWithMountedSSHFSVolumeOpts struct {
+	// Identifier of the SSHFS volume to mount.
+	Source *Directory
+	// A user:group to set for the mounted SSHFS volume.
+	//
+	// The user and group can either be an ID (1000:1000) or a name (foo:bar).
+	//
+	// If the group is omitted, it defaults to the same as the user.
+	Owner string
+	// Replace "${VAR}" or "$VAR" in the value of path according to the current environment variables defined in the container (e.g. "/$VAR/foo").
+	Expand bool
+}
+
+// Retrieves this container plus a SSHFS volume mounted at the given path.
+func (r *Container) WithMountedSSHFSVolume(path string, opts ...ContainerWithMountedSSHFSVolumeOpts) *Container {
+	q := r.query.Select("withMountedSSHFSVolume")
+	for i := len(opts) - 1; i >= 0; i-- {
+		// `source` optional argument
+		if !querybuilder.IsZeroValue(opts[i].Source) {
+			q = q.Arg("source", opts[i].Source)
+		}
+		// `owner` optional argument
+		if !querybuilder.IsZeroValue(opts[i].Owner) {
+			q = q.Arg("owner", opts[i].Owner)
+		}
+		// `expand` optional argument
+		if !querybuilder.IsZeroValue(opts[i].Expand) {
+			q = q.Arg("expand", opts[i].Expand)
+		}
+	}
+	q = q.Arg("path", path)
 
 	return &Container{
 		query: q,
@@ -4605,6 +4655,30 @@ func (r *Env) WithModuleSourceInput(name string, value *ModuleSource, descriptio
 // Declare a desired ModuleSource output to be assigned in the environment
 func (r *Env) WithModuleSourceOutput(name string, description string) *Env {
 	q := r.query.Select("withModuleSourceOutput")
+	q = q.Arg("name", name)
+	q = q.Arg("description", description)
+
+	return &Env{
+		query: q,
+	}
+}
+
+// Create or update a binding of type SSHFSVolume in the environment
+func (r *Env) WithSSHFSVolumeInput(name string, value *SSHFSVolume, description string) *Env {
+	assertNotNil("value", value)
+	q := r.query.Select("withSSHFSVolumeInput")
+	q = q.Arg("name", name)
+	q = q.Arg("value", value)
+	q = q.Arg("description", description)
+
+	return &Env{
+		query: q,
+	}
+}
+
+// Declare a desired SSHFSVolume output to be assigned in the environment
+func (r *Env) WithSSHFSVolumeOutput(name string, description string) *Env {
+	q := r.query.Select("withSSHFSVolumeOutput")
 	q = q.Arg("name", name)
 	q = q.Arg("description", description)
 
@@ -9757,6 +9831,16 @@ func (r *Client) LoadSDKConfigFromID(id SDKConfigID) *SDKConfig {
 	}
 }
 
+// Load a SSHFSVolume from its ID.
+func (r *Client) LoadSSHFSVolumeFromID(id SSHFSVolumeID) *SSHFSVolume {
+	q := r.query.Select("loadSSHFSVolumeFromID")
+	q = q.Arg("id", id)
+
+	return &SSHFSVolume{
+		query: q,
+	}
+}
+
 // Load a ScalarTypeDef from its ID.
 func (r *Client) LoadScalarTypeDefFromID(id ScalarTypeDefID) *ScalarTypeDef {
 	q := r.query.Select("loadScalarTypeDefFromID")
@@ -9947,6 +10031,16 @@ func (r *Client) SourceMap(filename string, line int, column int) *SourceMap {
 	}
 }
 
+// Constructs a sshfsVolume volume for a given sshfsVolume key.
+func (r *Client) SshfsVolume(key string) *SSHFSVolume {
+	q := r.query.Select("sshfsVolume")
+	q = q.Arg("key", key)
+
+	return &SSHFSVolume{
+		query: q,
+	}
+}
+
 // Create a new TypeDef.
 func (r *Client) TypeDef() *TypeDef {
 	q := r.query.Select("typeDef")
@@ -10031,6 +10125,59 @@ func (r *SDKConfig) Source(ctx context.Context) (string, error) {
 
 	q = q.Bind(&response)
 	return response, q.Execute(ctx)
+}
+
+// A directory whose contents persist across runs.
+type SSHFSVolume struct {
+	query *querybuilder.Selection
+
+	id *SSHFSVolumeID
+}
+
+func (r *SSHFSVolume) WithGraphQLQuery(q *querybuilder.Selection) *SSHFSVolume {
+	return &SSHFSVolume{
+		query: q,
+	}
+}
+
+// A unique identifier for this SSHFSVolume.
+func (r *SSHFSVolume) ID(ctx context.Context) (SSHFSVolumeID, error) {
+	if r.id != nil {
+		return *r.id, nil
+	}
+	q := r.query.Select("id")
+
+	var response SSHFSVolumeID
+
+	q = q.Bind(&response)
+	return response, q.Execute(ctx)
+}
+
+// XXX_GraphQLType is an internal function. It returns the native GraphQL type name
+func (r *SSHFSVolume) XXX_GraphQLType() string {
+	return "SSHFSVolume"
+}
+
+// XXX_GraphQLIDType is an internal function. It returns the native GraphQL type name for the ID of this object
+func (r *SSHFSVolume) XXX_GraphQLIDType() string {
+	return "SSHFSVolumeID"
+}
+
+// XXX_GraphQLID is an internal function. It returns the underlying type ID
+func (r *SSHFSVolume) XXX_GraphQLID(ctx context.Context) (string, error) {
+	id, err := r.ID(ctx)
+	if err != nil {
+		return "", err
+	}
+	return string(id), nil
+}
+
+func (r *SSHFSVolume) MarshalJSON() ([]byte, error) {
+	id, err := r.ID(marshalCtx)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(id)
 }
 
 // A definition of a custom scalar defined in a Module.

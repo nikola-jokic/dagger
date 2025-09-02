@@ -402,6 +402,12 @@ func LoadSDKConfigFromID(id dagger.SDKConfigID) *dagger.SDKConfig {
 	return client.LoadSDKConfigFromID(id)
 }
 
+// Load a SSHFSVolume from its ID.
+func LoadSSHFSVolumeFromID(id dagger.SSHFSVolumeID) *dagger.SSHFSVolume {
+	client := initClient()
+	return client.LoadSSHFSVolumeFromID(id)
+}
+
 // Load a ScalarTypeDef from its ID.
 func LoadScalarTypeDefFromID(id dagger.ScalarTypeDefID) *dagger.ScalarTypeDef {
 	client := initClient()
@@ -486,6 +492,12 @@ func SetSecret(name string, plaintext string) *dagger.Secret {
 func SourceMap(filename string, line int, column int) *dagger.SourceMap {
 	client := initClient()
 	return client.SourceMap(filename, line, column)
+}
+
+// Constructs a sshfsVolume volume for a given sshfsVolume key.
+func SshfsVolume(key string) *dagger.SSHFSVolume {
+	client := initClient()
+	return client.SshfsVolume(key)
 }
 
 // Create a new TypeDef.

@@ -797,6 +797,42 @@ func (container *Container) WithMountedCache(ctx context.Context, target string,
 	return container, nil
 }
 
+func (container *Container) WithMountedSSHFSVolume(ctx context.Context, target string, source *Directory, owner string) (*Container, error) {
+	container = container.Clone()
+
+	target = absPath(container.Config.WorkingDir, target)
+
+	mount := ContainerMount{
+		Target: target,
+	}
+
+	if source != nil {
+		mount.Source = source.LLB
+		mount.SourcePath = source.Dir
+	}
+
+	if owner != "" {
+		var err error
+		mount.Source, mount.SourcePath, err = container.chown(
+			ctx,
+			mount.Source,
+			mount.SourcePath,
+			owner,
+			llb.Platform(container.Platform.Spec()),
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	container.Mounts = container.Mounts.With(mount)
+
+	// set image ref to empty string
+	container.ImageRef = ""
+
+	return container, nil
+}
+
 func (container *Container) WithMountedTemp(ctx context.Context, target string, size int) (*Container, error) {
 	container = container.Clone()
 
@@ -1791,7 +1827,7 @@ func (container *Container) AsService(ctx context.Context, args ContainerAsServi
 		useEntrypoint = true
 	}
 
-	var cmdargs = container.Config.Cmd
+	cmdargs := container.Config.Cmd
 	if len(args.Args) > 0 {
 		cmdargs = args.Args
 		if !args.UseEntrypoint {

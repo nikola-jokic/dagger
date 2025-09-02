@@ -50,6 +50,7 @@ func (m *CoreMod) Install(ctx context.Context, dag *dagql.Server) error {
 		&gitSchema{},
 		&containerSchema{},
 		&cacheSchema{},
+		&sshfsVolumeSchema{},
 		&secretSchema{},
 		&serviceSchema{},
 		&hostSchema{},

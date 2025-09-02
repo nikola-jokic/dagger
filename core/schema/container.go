@@ -293,6 +293,18 @@ func (s *containerSchema) Install(srv *dagql.Server) {
 					`environment variables defined in the container (e.g. "/$VAR/foo").`),
 			),
 
+		dagql.Func("withMountedSSHFSVolume", s.withMountedSSHFSVolume).
+			Doc(`Retrieves this container plus a SSHFS volume mounted at the given path.`).
+			Args(
+				dagql.Arg("path").Doc(`Location of the SSHFS mount (e.g., "/mnt/sshfs").`),
+				dagql.Arg("source").Doc(`Identifier of the SSHFS volume to mount.`),
+				dagql.Arg("owner").Doc(`A user:group to set for the mounted SSHFS volume.`,
+					`The user and group can either be an ID (1000:1000) or a name (foo:bar).`,
+					`If the group is omitted, it defaults to the same as the user.`),
+				dagql.Arg("expand").Doc(`Replace "${VAR}" or "$VAR" in the value of path according to the current `+
+					`environment variables defined in the container (e.g. "/$VAR/foo").`),
+			),
+
 		dagql.Func("withMountedSecret", s.withMountedSecret).
 			Doc(`Retrieves this container plus a secret mounted into a file at the given path.`).
 			Args(
@@ -1587,6 +1599,41 @@ func (s *containerSchema) withMountedCache(ctx context.Context, parent *core.Con
 		cache.Self(),
 		dir,
 		args.Sharing,
+		args.Owner,
+	)
+}
+
+type containerWithMountedSSHFSVolumeArgs struct {
+	Path   string
+	Source dagql.Optional[core.DirectoryID]
+	Owner  string `default:""`
+	Expand bool   `default:"false"`
+}
+
+func (s *containerSchema) withMountedSSHFSVolume(ctx context.Context, parent *core.Container, args containerWithMountedSSHFSVolumeArgs) (*core.Container, error) {
+	srv, err := core.CurrentDagqlServer(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get server: %w", err)
+	}
+
+	var dir *core.Directory
+	if args.Source.Valid {
+		inst, err := args.Source.Value.Load(ctx, srv)
+		if err != nil {
+			return nil, err
+		}
+		dir = inst.Self()
+	}
+
+	path, err := expandEnvVar(ctx, parent, args.Path, args.Expand)
+	if err != nil {
+		return nil, err
+	}
+
+	return parent.WithMountedSSHFSVolume(
+		ctx,
+		path,
+		dir,
 		args.Owner,
 	)
 }
