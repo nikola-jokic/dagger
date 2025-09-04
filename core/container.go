@@ -21,6 +21,9 @@ import (
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/pkg/transfer/archive"
 	"github.com/containerd/platforms"
+	"github.com/dagger/dagger/dagql"
+	"github.com/dagger/dagger/dagql/call"
+	"github.com/dagger/dagger/engine/buildkit"
 	"github.com/distribution/reference"
 	bkcache "github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/client/llb"
@@ -37,10 +40,6 @@ import (
 	"github.com/vektah/gqlparser/v2/ast"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
-
-	"github.com/dagger/dagger/dagql"
-	"github.com/dagger/dagger/dagql/call"
-	"github.com/dagger/dagger/engine/buildkit"
 )
 
 var ErrMountNotExist = errors.New("mount does not exist")
@@ -797,40 +796,8 @@ func (container *Container) WithMountedCache(ctx context.Context, target string,
 	return container, nil
 }
 
-func (container *Container) WithMountedSSHFSVolume(ctx context.Context, target string, source *Directory, owner string) (*Container, error) {
-	container = container.Clone()
-
-	target = absPath(container.Config.WorkingDir, target)
-
-	mount := ContainerMount{
-		Target: target,
-	}
-
-	if source != nil {
-		mount.Source = source.LLB
-		mount.SourcePath = source.Dir
-	}
-
-	if owner != "" {
-		var err error
-		mount.Source, mount.SourcePath, err = container.chown(
-			ctx,
-			mount.Source,
-			mount.SourcePath,
-			owner,
-			llb.Platform(container.Platform.Spec()),
-		)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	container.Mounts = container.Mounts.With(mount)
-
-	// set image ref to empty string
-	container.ImageRef = ""
-
-	return container, nil
+func (container *Container) WithMountedSSHFSVolume(ctx context.Context, target string, source *SSHFSVolume, owner string) (*Container, error) {
+	panic("not implemented: WithMountedSSHFSVolume")
 }
 
 func (container *Container) WithMountedTemp(ctx context.Context, target string, size int) (*Container, error) {

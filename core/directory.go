@@ -61,6 +61,7 @@ func (*Directory) TypeDescription() string {
 func (dir *Directory) getResult() bkcache.ImmutableRef {
 	return dir.Result
 }
+
 func (dir *Directory) setResult(ref bkcache.ImmutableRef) {
 	dir.Result = ref
 }
@@ -391,7 +392,7 @@ func (dir *Directory) WithNewFile(ctx context.Context, dest string, content []by
 
 	parent, _ := path.Split(dest)
 	if parent != "" {
-		st = st.File(llb.Mkdir(parent, 0755, llb.WithParents(true)))
+		st = st.File(llb.Mkdir(parent, 0o755, llb.WithParents(true)))
 	}
 
 	opts := []llb.MkfileOption{}
@@ -427,7 +428,7 @@ func (dir *Directory) WithNewFileDagOp(ctx context.Context, dest string, content
 			return err
 		}
 		destPathDir, _ := filepath.Split(resolvedDest)
-		err = os.MkdirAll(filepath.Dir(destPathDir), 0755)
+		err = os.MkdirAll(filepath.Dir(destPathDir), 0o755)
 		if err != nil {
 			return err
 		}
@@ -793,7 +794,7 @@ func (dir *Directory) WithFile(
 			destPath = path.Join(destPath, srcFilename)
 		}
 		destPathDir, _ := filepath.Split(destPath)
-		err = os.MkdirAll(filepath.Dir(destPathDir), 0755)
+		err = os.MkdirAll(filepath.Dir(destPathDir), 0o755)
 		if err != nil {
 			return err
 		}
@@ -957,7 +958,7 @@ func (dir *Directory) WithNewDirectory(ctx context.Context, dest string, permiss
 	dest = path.Join(dir.Dir, dest)
 
 	if permissions == 0 {
-		permissions = 0755
+		permissions = 0o755
 	}
 
 	return execInMount(ctx, dir, func(root string) error {
@@ -1140,7 +1141,7 @@ func (dir *Directory) WithSymlink(ctx context.Context, srv *dagql.Server, target
 		if err != nil {
 			return err
 		}
-		err = os.MkdirAll(resolvedLinkDir, 0755)
+		err = os.MkdirAll(resolvedLinkDir, 0o755)
 		if err != nil {
 			return err
 		}

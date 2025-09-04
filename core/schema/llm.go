@@ -93,9 +93,11 @@ func (s llmSchema) Install(srv *dagql.Server) {
 	}.Install(srv)
 	dagql.Fields[*core.LLMTokenUsage]{}.Install(srv)
 }
+
 func (s *llmSchema) withEnv(ctx context.Context, llm *core.LLM, args struct {
 	Env core.EnvID
-}) (*core.LLM, error) {
+},
+) (*core.LLM, error) {
 	env, err := args.Env.Load(ctx, s.srv)
 	if err != nil {
 		return nil, err
@@ -136,19 +138,22 @@ func (s *llmSchema) lastReply(ctx context.Context, llm *core.LLM, args struct{})
 
 func (s *llmSchema) withModel(ctx context.Context, llm *core.LLM, args struct {
 	Model string
-}) (*core.LLM, error) {
+},
+) (*core.LLM, error) {
 	return llm.WithModel(args.Model), nil
 }
 
 func (s *llmSchema) withPrompt(ctx context.Context, llm *core.LLM, args struct {
 	Prompt string
-}) (*core.LLM, error) {
+},
+) (*core.LLM, error) {
 	return llm.WithPrompt(args.Prompt), nil
 }
 
 func (s *llmSchema) withSystemPrompt(ctx context.Context, llm *core.LLM, args struct {
 	Prompt string
-}) (*core.LLM, error) {
+},
+) (*core.LLM, error) {
 	return llm.WithSystemPrompt(args.Prompt), nil
 }
 
@@ -158,7 +163,8 @@ func (s *llmSchema) withoutDefaultSystemPrompt(ctx context.Context, llm *core.LL
 
 func (s *llmSchema) withPromptFile(ctx context.Context, llm *core.LLM, args struct {
 	File core.FileID
-}) (*core.LLM, error) {
+},
+) (*core.LLM, error) {
 	file, err := args.File.Load(ctx, s.srv)
 	if err != nil {
 		return nil, err
@@ -172,7 +178,8 @@ func (s *llmSchema) loop(ctx context.Context, llm *core.LLM, args struct{}) (*co
 
 func (s *llmSchema) attempt(_ context.Context, llm *core.LLM, _ struct {
 	Number int
-}) (*core.LLM, error) {
+},
+) (*core.LLM, error) {
 	// clone the LLM object, since it updates in-place when Sync is called, and we
 	// want to branch off from here
 	return llm.Clone(), nil
@@ -181,7 +188,8 @@ func (s *llmSchema) attempt(_ context.Context, llm *core.LLM, _ struct {
 func (s *llmSchema) llm(ctx context.Context, parent *core.Query, args struct {
 	Model       dagql.Optional[dagql.String]
 	MaxAPICalls dagql.Optional[dagql.Int] `name:"maxAPICalls"`
-}) (*core.LLM, error) {
+},
+) (*core.LLM, error) {
 	var model string
 	if args.Model.Valid {
 		model = args.Model.Value.String()
@@ -215,7 +223,8 @@ func (s *llmSchema) tools(ctx context.Context, llm *core.LLM, _ struct{}) (strin
 
 func (s *llmSchema) bindResult(ctx context.Context, llm *core.LLM, args struct {
 	Name string
-}) (dagql.Nullable[*core.Binding], error) {
+},
+) (dagql.Nullable[*core.Binding], error) {
 	return llm.BindResult(ctx, s.srv, args.Name)
 }
 

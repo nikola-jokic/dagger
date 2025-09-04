@@ -699,7 +699,6 @@ func (r ObjectResult[T]) call(
 			OnRelease: valWithCallbacks.OnRelease,
 		}, nil
 	}, opts...)
-
 	if err != nil {
 		return nil, err
 	}

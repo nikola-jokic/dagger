@@ -101,14 +101,16 @@ func (s *fileSchema) file(ctx context.Context, parent *core.Query, args struct {
 	Name        string
 	Contents    string
 	Permissions int `default:"0644"`
-}) (*core.File, error) {
+},
+) (*core.File, error) {
 	return core.NewFileWithContents(ctx, args.Name, []byte(args.Contents), fs.FileMode(args.Permissions), nil, parent.Platform())
 }
 
 func (s *fileSchema) contents(ctx context.Context, file *core.File, args struct {
 	OffsetLines *int
 	LimitLines  *int
-}) (dagql.String, error) {
+},
+) (dagql.String, error) {
 	content, err := file.Contents(ctx, args.OffsetLines, args.LimitLines)
 	if err != nil {
 		return "", err

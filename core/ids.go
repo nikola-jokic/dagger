@@ -14,6 +14,8 @@ type CacheVolumeID = dagql.ID[*CacheVolume]
 
 type DirectoryID = dagql.ID[*Directory]
 
+type SSHFSVolumeID = dagql.ID[*SSHFSVolume]
+
 type FileID = dagql.ID[*File]
 
 type SecretID = dagql.ID[*Secret]

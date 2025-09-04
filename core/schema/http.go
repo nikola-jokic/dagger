@@ -80,7 +80,7 @@ func (s *httpSchema) http(ctx context.Context, parent dagql.ObjectResult[*core.Q
 	if err != nil {
 		return inst, err
 	}
-	permissions := 0600
+	permissions := 0o600
 	if args.Permissions != nil {
 		permissions = *args.Permissions
 	}
