@@ -672,7 +672,7 @@ func (ref *RemoteGitRef) Tree(ctx context.Context, srv *dagql.Server, discardGit
 
 		err = MountRef(ctx, checkoutRef, bkSessionGroup, func(checkoutDir string) error {
 			checkoutDirGit := filepath.Join(checkoutDir, ".git")
-			if err := os.MkdirAll(checkoutDir, 0711); err != nil {
+			if err := os.MkdirAll(checkoutDir, 0o711); err != nil {
 				return err
 			}
 			checkoutGit := git.New(gitutil.WithWorkTree(checkoutDir), gitutil.WithGitDir(checkoutDirGit))
@@ -994,7 +994,7 @@ func (ref *LocalGitRef) Tree(ctx context.Context, srv *dagql.Server, discardGitD
 
 		return MountRef(ctx, bkref, bkSessionGroup, func(checkoutDir string) error {
 			checkoutDirGit := filepath.Join(checkoutDir, ".git")
-			if err := os.MkdirAll(checkoutDir, 0711); err != nil {
+			if err := os.MkdirAll(checkoutDir, 0o711); err != nil {
 				return err
 			}
 			checkoutGit := git.New(
@@ -1214,7 +1214,7 @@ func mountResolv(dns *oci.DNSConfig) (string, error) {
 		return "", fmt.Errorf("failed to close temporary resolv.conf file: %w", err)
 	}
 
-	if err := os.Chmod(tempFile.Name(), 0644); err != nil {
+	if err := os.Chmod(tempFile.Name(), 0o644); err != nil {
 		os.Remove(tempFile.Name())
 		return "", err
 	}
@@ -1242,7 +1242,7 @@ func unshareAndRun(ctx context.Context, cmd *exec.Cmd, hosts, resolv string) err
 	if err := syscall.Unshare(syscall.CLONE_FS | syscall.CLONE_NEWNS); err != nil {
 		return err
 	}
-	syscall.Umask(0022)
+	syscall.Umask(0o022)
 	if err := overrideNetworkConfig(hosts, resolv); err != nil {
 		return fmt.Errorf("failed to override network config: %w", err)
 	}

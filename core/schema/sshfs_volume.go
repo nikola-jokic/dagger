@@ -40,15 +40,20 @@ type sshfsVolumeArgs struct {
 	PublicKey  string        `name:"publicKey"`
 }
 
-func (s *sshfsVolumeSchema) sshfsVolume(ctx context.Context, parent dagql.ObjectResult[*core.Query], args sshfsVolumeArgs) (dagql.Result[*core.SSHFSVolume], error) {
+func (s *sshfsVolumeSchema) sshfsVolume(ctx context.Context, parent dagql.ObjectResult[*core.Query], args sshfsVolumeArgs) (inst dagql.Result[*core.SSHFSVolume], err error) {
 	srv, err := core.CurrentDagqlServer(ctx)
 	if err != nil {
-		return dagql.Result[*core.SSHFSVolume]{}, fmt.Errorf("failed to get dagql server: %w", err)
+		return inst, fmt.Errorf("failed to get dagql server: %w", err)
 	}
 
-	privateKey, err := args.PrivateKey.Load(ctx, srv)
+	secretStore, err := parent.Self().Secrets(ctx)
 	if err != nil {
-		return dagql.Result[*core.SSHFSVolume]{}, fmt.Errorf("failed to load private key from secret ID: %w", err)
+		return inst, fmt.Errorf("failed to get secret store: %w", err)
+	}
+
+	privateKey, err := secretStore.GetSecretPlaintext(ctx, args.PrivateKey.ID().Digest())
+	if err != nil {
+		return inst, fmt.Errorf("failed to get private key secret: %w", err)
 	}
 
 	return dagql.NewResultForCurrentID(ctx, &core.SSHFSVolume{

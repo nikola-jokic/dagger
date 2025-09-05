@@ -1605,7 +1605,7 @@ func (s *containerSchema) withMountedCache(ctx context.Context, parent *core.Con
 
 type containerWithMountedSSHFSVolumeArgs struct {
 	Path   string
-	Source dagql.Optional[core.SSHFSVolumeID]
+	Source core.SSHFSVolumeID
 	Owner  string `default:""`
 	Expand bool   `default:"false"`
 }
@@ -1616,13 +1616,9 @@ func (s *containerSchema) withMountedSSHFSVolume(ctx context.Context, parent *co
 		return nil, fmt.Errorf("failed to get server: %w", err)
 	}
 
-	var dir *core.SSHFSVolume
-	if args.Source.Valid {
-		inst, err := args.Source.Value.Load(ctx, srv)
-		if err != nil {
-			return nil, err
-		}
-		dir = inst.Self()
+	sshfsVolume, err := args.Source.Load(ctx, srv)
+	if err != nil {
+		return nil, err
 	}
 
 	path, err := expandEnvVar(ctx, parent, args.Path, args.Expand)
@@ -1633,7 +1629,7 @@ func (s *containerSchema) withMountedSSHFSVolume(ctx context.Context, parent *co
 	return parent.WithMountedSSHFSVolume(
 		ctx,
 		path,
-		dir,
+		sshfsVolume.Self(),
 		args.Owner,
 	)
 }

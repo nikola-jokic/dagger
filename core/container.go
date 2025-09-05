@@ -296,6 +296,8 @@ type ContainerMount struct {
 	// How to share the cache across concurrent runs.
 	CacheSharingMode CacheSharingMode
 
+	SSHFSSocket *ContainerSocket
+
 	// Configure the mount as a tmpfs.
 	Tmpfs bool
 

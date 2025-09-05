@@ -286,7 +286,7 @@ func (store *SocketStore) MountSocket(ctx context.Context, idDgst digest.Digest)
 		}
 	}()
 
-	if err := os.Chmod(dir, 0711); err != nil {
+	if err := os.Chmod(dir, 0o711); err != nil {
 		return "", nil, fmt.Errorf("failed to chmod temp dir: %w", err)
 	}
 
@@ -300,7 +300,7 @@ func (store *SocketStore) MountSocket(ctx context.Context, idDgst digest.Digest)
 	// TODO: correctly set uid,gid,mode
 	uid := 0
 	gid := 0
-	mode := 0775
+	mode := 0o775
 	if err := os.Chown(sockPath, uid, gid); err != nil {
 		l.Close()
 		return "", nil, fmt.Errorf("failed to chown unix socket: %w", err)

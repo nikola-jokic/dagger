@@ -624,6 +624,23 @@ func getAllContainerMounts(container *Container) (mounts []*pb.Mount, states []l
 			}
 		}
 
+		if mnt.SSHFSSocket != nil {
+			mount.Output = pb.SkipOutput
+			mount.MountType = pb.MountType_SSH
+
+			uid, gid := 0, 0
+			if mnt.SSHFSSocket.Owner != nil {
+				uid, gid = mnt.SSHFSSocket.Owner.UID, mnt.SSHFSSocket.Owner.GID
+			}
+			mount.SSHOpt = &pb.SSHOpt{
+				ID:   mnt.SSHFSSocket.Source.LLBID(),
+				Uid:  uint32(uid),
+				Gid:  uint32(gid),
+				Mode: 0o755,
+			}
+			mounts = append(mounts, mount)
+		}
+
 		if mnt.Tmpfs {
 			mount.Output = pb.SkipOutput
 			mount.MountType = pb.MountType_TMPFS

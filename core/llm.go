@@ -373,9 +373,7 @@ func (r *LLMRouter) LoadConfig(ctx context.Context, getenv func(context.Context,
 		return save("GEMINI_MODEL", &r.GeminiModel)
 	})
 
-	var (
-		openAIDisableStreaming string
-	)
+	var openAIDisableStreaming string
 	eg.Go(func() error {
 		var err error
 		openAIDisableStreaming, err = getenv(ctx, "OPENAI_DISABLE_STREAMING")
@@ -811,7 +809,6 @@ func (llm *LLM) loop(ctx context.Context) error {
 			// Success, stop retrying
 			return nil
 		}, backoff.WithContext(b, ctx))
-
 		// Check the final error after retries (if any)
 		if err != nil {
 			var finished *ModelFinishedError

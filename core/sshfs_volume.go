@@ -1,14 +1,17 @@
 package core
 
 import (
+	"github.com/dagger/dagger/dagql"
+	"github.com/moby/buildkit/solver/pb"
 	"github.com/vektah/gqlparser/v2/ast"
 )
 
 // SSHFSVolume is a persistent volume with a globally scoped identifier.
 type SSHFSVolume struct {
-	Endpoint   string `json:"endpoint"`
-	PrivateKey Secret `json:"privateKey"`
-	PublicKey  string `json:"publicKey"`
+	LLB *pb.Definition
+
+	Endpoint  string
+	SSHSocket dagql.ObjectResult[*Socket]
 }
 
 func (*SSHFSVolume) Type() *ast.Type {
