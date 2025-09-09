@@ -3,9 +3,12 @@ package schema
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/dagger/dagger/core"
 	"github.com/dagger/dagger/dagql"
+	"github.com/dagger/dagger/engine"
 )
 
 type sshfsVolumeSchema struct{}
@@ -41,24 +44,84 @@ type sshfsVolumeArgs struct {
 }
 
 func (s *sshfsVolumeSchema) sshfsVolume(ctx context.Context, parent dagql.ObjectResult[*core.Query], args sshfsVolumeArgs) (inst dagql.Result[*core.SSHFSVolume], err error) {
-	srv, err := core.CurrentDagqlServer(ctx)
+	srv, err := core.CurrentDagqlServer(ctx) // get server
 	if err != nil {
-		return inst, fmt.Errorf("failed to get dagql server: %w", err)
+		return inst, err
 	}
 
-	secretStore, err := parent.Self().Secrets(ctx)
+	query, err := core.CurrentQuery(ctx) // get current query
 	if err != nil {
-		return inst, fmt.Errorf("failed to get secret store: %w", err)
+		return inst, err
 	}
 
-	privateKey, err := secretStore.GetSecretPlaintext(ctx, args.PrivateKey.ID().Digest())
+	secrets, err := query.Secrets(ctx) // secret store
+	if err != nil {
+		return inst, err
+	}
+
+	privateKey, err := secrets.GetSecretPlaintext(ctx, args.PrivateKey.ID().Digest())
 	if err != nil {
 		return inst, fmt.Errorf("failed to get private key secret: %w", err)
 	}
 
-	return dagql.NewResultForCurrentID(ctx, &core.SSHFSVolume{
-		Endpoint:   args.Endpoint,
-		PrivateKey: *privateKey.Self(),
+	socketStore, err := query.Sockets(ctx) // socket store
+	if err != nil {
+		return inst, err
+	}
+
+	clientMetadata, err := engine.ClientMetadataFromContext(ctx) // needed for Add*Socket
+	if err != nil {
+		return inst, err
+	}
+
+	tmpDir, err := os.MkdirTemp("", "sshfs-*")
+	if err != nil {
+		return inst, fmt.Errorf("failed to create temp dir for sshfs socket: %w", err)
+	}
+	socketPath := filepath.Join(tmpDir, "ssh-agent.sock")
+
+	// compute an accessor for the socket. For host path use:
+	accessor, err := core.GetClientResourceAccessor(ctx, query, socketPath)
+	if err != nil {
+		return inst, err
+	}
+
+	// compute digest (this becomes the socket ID)
+	dgst := dagql.HashFrom(accessor)
+
+	// create the Socket object
+	sock := &core.Socket{IDDigest: dgst}
+
+	// create an ObjectResult for the socket (so you can embed it in other objects)
+	sockInst, err := dagql.NewObjectResultForCurrentID(ctx, srv, sock)
+	if err != nil {
+		return inst, err
+	}
+
+	// ensure the returned ID has the digest in it (same pattern used in host.socket)
+	sockInst = sockInst.WithObjectDigest(dgst)
+
+	// register socket in the store so MountSocket/ForwardAgent can find it.
+	// For a unix socket on the client host:
+	if err := socketStore.AddUnixSocket(sock, clientMetadata.ClientID, socketPath); err != nil {
+		return inst, fmt.Errorf("failed to add unix socket to store: %w", err)
+	}
+
+	backend := &core.SSHBackend{
+		PrivateKey: string(privateKey),
 		PublicKey:  args.PublicKey,
+		SocketPath: socketPath,
+	}
+
+	if err := backend.Start(); err != nil {
+		return inst, fmt.Errorf("failed to start ssh backend: %w", err)
+	}
+
+	// Now attach sockInst to your SSHFSVolume being returned:
+	return dagql.NewResultForCurrentID(ctx, &core.SSHFSVolume{
+		Endpoint:  args.Endpoint,
+		SSHSocket: sockInst, // <-- ObjectResult[*core.Socket]
+		Backend:   backend,
+		// ...other fields...
 	})
 }
