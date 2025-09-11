@@ -170,6 +170,8 @@ func (container *Container) execMeta(ctx context.Context, opts ContainerExecOpts
 		}
 	}
 
+	execMD.HostMounts = container.HostMounts
+
 	return &execMD, nil
 }
 
@@ -464,6 +466,7 @@ func (container *Container) WithExec(
 		// Stdin/Stdout/Stderr can be setup in Worker.setupStdio
 		procInfo.Stdin = io.NopCloser(strings.NewReader(opts.Stdin))
 	}
+
 	_, execErr := exec.Run(ctx, "", p.Root, p.Mounts, procInfo, nil)
 
 	for i, ref := range p.OutputRefs {

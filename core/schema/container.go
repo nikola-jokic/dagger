@@ -243,6 +243,13 @@ func (s *containerSchema) Install(srv *dagql.Server) {
 		dagql.Func("mounts", s.mounts).
 			Doc(`Retrieves the list of paths where a directory is mounted.`),
 
+		dagql.Func("withMountedHostDirectory", s.withMountedHostDirectory).
+			Doc(`Retrieves this container plus a host directory mounted at the given path.`).
+			Args(
+				dagql.Arg("source").Doc(`Source path of the host directory to mount (e.g., "/home/user/directory").`),
+				dagql.Arg("path").Doc(`Location of the mounted directory (e.g., "/mnt/directory").`),
+			),
+
 		dagql.Func("withMountedDirectory", s.withMountedDirectory).
 			Doc(`Retrieves this container plus a directory mounted at the given path.`).
 			Args(
@@ -1415,6 +1422,15 @@ func (s *containerSchema) label(ctx context.Context, parent *core.Container, arg
 	}
 
 	return none, nil
+}
+
+type containerWithMountedHostDirectoryArgs struct {
+	Path   string
+	Source string
+}
+
+func (s *containerSchema) withMountedHostDirectory(ctx context.Context, parent *core.Container, args containerWithMountedHostDirectoryArgs) (*core.Container, error) {
+	return parent.WithMountedHostDirectory(ctx, args.Path, args.Source), nil
 }
 
 type containerWithMountedDirectoryArgs struct {

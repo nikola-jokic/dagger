@@ -2455,6 +2455,17 @@ func (r *Container) WithMountedFile(path string, source *File, opts ...Container
 	}
 }
 
+// Retrieves this container plus a host directory mounted at the given path.
+func (r *Container) WithMountedHostDirectory(source string, path string) *Container {
+	q := r.query.Select("withMountedHostDirectory")
+	q = q.Arg("source", source)
+	q = q.Arg("path", path)
+
+	return &Container{
+		query: q,
+	}
+}
+
 // ContainerWithMountedSecretOpts contains options for Container.WithMountedSecret
 type ContainerWithMountedSecretOpts struct {
 	// A user:group to set for the mounted secret.
