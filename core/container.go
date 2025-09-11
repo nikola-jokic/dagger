@@ -72,6 +72,8 @@ type Container struct {
 	// Mount points configured for the container.
 	Mounts ContainerMounts
 
+	HostMounts []buildkit.HostMount
+
 	// Meta is the /dagger filesystem. It will be null if nothing has run yet.
 	Meta *Directory
 
@@ -177,6 +179,7 @@ func (container *Container) Clone() *Container {
 	cp := *container
 	cp.Config.ExposedPorts = maps.Clone(cp.Config.ExposedPorts)
 	cp.Config.Env = slices.Clone(cp.Config.Env)
+	cp.HostMounts = slices.Clone(cp.HostMounts)
 	cp.Config.Entrypoint = slices.Clone(cp.Config.Entrypoint)
 	cp.Config.Cmd = slices.Clone(cp.Config.Cmd)
 	cp.Config.Volumes = maps.Clone(cp.Config.Volumes)
@@ -1046,6 +1049,25 @@ func (container *Container) WithFiles(
 	}
 
 	return container, nil
+}
+func (container *Container) WithMountedHostDirectory(ctx context.Context, target string, source string) *Container {
+	container = container.Clone()
+
+	target = absPath(container.Config.WorkingDir, target)
+	source, err := filepath.Abs(source)
+	if err != nil {
+		// should never happen
+		panic(err)
+	}
+
+	container.HostMounts = append(container.HostMounts, buildkit.HostMount{
+		Target: target,
+		Source: source,
+	})
+
+	container.ImageRef = ""
+
+	return container
 }
 
 func (container *Container) WithNewFile(
