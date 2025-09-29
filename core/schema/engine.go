@@ -22,6 +22,13 @@ func (s *engineSchema) Install(srv *dagql.Server) {
 	dagql.Fields[*core.Engine]{
 		dagql.Func("localCache", s.localCache).
 			Doc("The local (on-disk) cache for the Dagger engine"),
+		dagql.NodeFuncWithCacheKey("sshfsVolume", s.sshfsVolume, dagql.CachePerCall).
+			Doc("Create or reuse an sshfs-backed engine volume").
+			Args(
+				dagql.Arg("endpoint").Doc("The SSH endpoint, e.g. user@host:/path"),
+				dagql.Arg("privateKey").Doc("Private key secret"),
+				dagql.Arg("publicKey").Doc("Public key secret"),
+			),
 	}.Install(srv)
 
 	dagql.Fields[*core.EngineCache]{
@@ -128,4 +135,34 @@ func (s *engineSchema) cachePrune(ctx context.Context, parent *core.EngineCache,
 
 func (s *engineSchema) cacheEntrySetEntries(ctx context.Context, parent *core.EngineCacheEntrySet, args struct{}) (dagql.Array[*core.EngineCacheEntry], error) {
 	return parent.EntriesList, nil
+}
+
+func (s *engineSchema) sshfsVolume(ctx context.Context, parent dagql.ObjectResult[*core.Engine], args struct {
+	Endpoint   string
+	PrivateKey dagql.ObjectResult[*core.Secret]
+	PublicKey  dagql.ObjectResult[*core.Secret]
+}) (i dagql.ObjectResult[*core.Volume], err error) {
+	query, err := core.CurrentQuery(ctx)
+	if err != nil {
+		return i, err
+	}
+	if err := query.RequireMainClient(ctx); err != nil {
+		return i, err
+	}
+
+	srv, err := core.CurrentDagqlServer(ctx)
+	if err != nil {
+		return i, fmt.Errorf("failed to get dagql server: %w", err)
+	}
+
+	// extract secret digests
+	privDgst := args.PrivateKey.ID().Digest()
+	pubDgst := args.PublicKey.ID().Digest()
+
+	vol, err := query.Server.RegisterSSHFSVolume(ctx, args.Endpoint, privDgst, pubDgst)
+	if err != nil {
+		return i, fmt.Errorf("failed to register sshfs volume: %w", err)
+	}
+
+	return dagql.NewObjectResultForCurrentID(ctx, srv, vol)
 }

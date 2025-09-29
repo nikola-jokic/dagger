@@ -178,6 +178,7 @@ type Server struct {
 	locker *locker.Locker
 
 	secretSalt []byte
+	sshfsMgr   *sshfsManager
 }
 
 type NewServerOpts struct {
