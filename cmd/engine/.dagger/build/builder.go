@@ -148,6 +148,8 @@ func (build *Builder) Engine(ctx context.Context) (*dagger.Container, error) {
 					"e2fsprogs",
 					// for Directory.search
 					"ripgrep",
+					// for SSHFS support
+					"sshfs",
 				},
 				Arch: build.platformSpec.Architecture,
 			}).
@@ -174,6 +176,8 @@ func (build *Builder) Engine(ctx context.Context) (*dagger.Container, error) {
 				"e2fsprogs",
 				// for Directory.search
 				"ripgrep",
+				// for SSHFS support
+				"sshfs",
 			}).
 			WithExec([]string{
 				"update-alternatives",
@@ -200,6 +204,8 @@ func (build *Builder) Engine(ctx context.Context) (*dagger.Container, error) {
 			"e2fsprogs",
 			// for Directory.search
 			"ripgrep",
+			// for SSHFS support
+			"sshfs",
 		}
 		if build.gpuSupport {
 			pkgs = append(pkgs, "nvidia-driver", "nvidia-tools")
