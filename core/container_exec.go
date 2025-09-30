@@ -170,7 +170,17 @@ func (container *Container) execMeta(ctx context.Context, opts ContainerExecOpts
 		}
 	}
 
-	execMD.HostMounts = container.HostMounts
+	// start with any host mounts configured directly
+	execMD.HostMounts = append([]buildkit.HostMount{}, container.HostMounts...)
+
+	// append mounts coming from engine-managed Volumes
+	for _, vm := range container.VolumeMounts {
+		if vm.Volume.Self() == nil {
+			return nil, fmt.Errorf("volume mount has nil volume")
+		}
+		src := vm.Volume.Self().MountPath
+		execMD.HostMounts = append(execMD.HostMounts, buildkit.HostMount{Source: src, Target: vm.Target})
+	}
 
 	return &execMD, nil
 }
