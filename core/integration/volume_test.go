@@ -153,7 +153,7 @@ sleep infinity
 	}
 	ip = strings.TrimSpace(ip)
 
-	sshfsEndpoint := fmt.Sprintf("ssh://root@%s:%d/root/repo", ip, sshPort)
+	sshfsEndpoint := fmt.Sprintf("root@%s:%d/root/repo", ip, sshPort)
 	t.Logf("sshfs endpoint using resolved service IP %s: %s", ip, sshfsEndpoint)
 
 	privKeySecret := c.SetSecret("sshfs-private-key", string(userPrivateKey))

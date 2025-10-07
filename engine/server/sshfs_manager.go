@@ -73,104 +73,104 @@ func (m *sshfsManager) ensureMounted(ctx context.Context, endpoint string, priva
 		return "", "", fmt.Errorf("failed to create mount dir: %w", err)
 	}
 
-    sshfsEndpoint := fmt.Sprintf("%s@%s:%s", user, host, remotePath)
+	sshfsEndpoint := fmt.Sprintf("%s@%s:%s", user, host, remotePath)
 
-    // Optional SSH connectivity probe (fast failure instead of waiting for sshfs to hang)
-    probeAttempts := 5
-    var probeErr error
-    for i := 0; i < probeAttempts; i++ {
-        // BatchMode + strict host key off for test/ephemeral usage
-        cmd := exec.CommandContext(ctx, "ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "BatchMode=yes", "-i", privateKeyPath, "-p", port, fmt.Sprintf("%s@%s", user, host), "true")
-        if err := cmd.Run(); err == nil {
-            probeErr = nil
-            break
-        } else {
-            probeErr = err
-            select {
-            case <-ctx.Done():
-                return "", "", fmt.Errorf("context canceled during ssh probe: %w", ctx.Err())
-            case <-time.After(250 * time.Millisecond):
-            }
-        }
-    }
-    if probeErr != nil {
-        return "", "", fmt.Errorf("ssh connectivity probe failed (host=%s port=%s): %w", host, port, probeErr)
-    }
+	// Optional SSH connectivity probe (fast failure instead of waiting for sshfs to hang)
+	probeAttempts := 5
+	var probeErr error
+	for i := 0; i < probeAttempts; i++ {
+		// BatchMode + strict host key off for test/ephemeral usage
+		cmd := exec.CommandContext(ctx, "ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "BatchMode=yes", "-i", privateKeyPath, "-p", port, fmt.Sprintf("%s@%s", user, host), "true")
+		if err := cmd.Run(); err == nil {
+			probeErr = nil
+			break
+		} else {
+			probeErr = err
+			select {
+			case <-ctx.Done():
+				return "", "", fmt.Errorf("context canceled during ssh probe: %w", ctx.Err())
+			case <-time.After(250 * time.Millisecond):
+			}
+		}
+	}
+	if probeErr != nil {
+		return "", "", fmt.Errorf("ssh connectivity probe failed (host=%s port=%s): %w", host, port, probeErr)
+	}
 
-    if st, err := os.Stat("/dev/fuse"); err != nil || (st.Mode()&os.ModeDevice) == 0 {
-        return "", "", fmt.Errorf("/dev/fuse not available inside engine container: %w", err)
-    }
+	if st, err := os.Stat("/dev/fuse"); err != nil || (st.Mode()&os.ModeDevice) == 0 {
+		return "", "", fmt.Errorf("/dev/fuse not available inside engine container: %w", err)
+	}
 
-    args := []string{
-        sshfsEndpoint,
-        mp,
-        "-o", fmt.Sprintf("IdentityFile=%s", privateKeyPath),
-        "-o", "IdentitiesOnly=yes",
-        "-o", "StrictHostKeyChecking=no",
-        "-o", "UserKnownHostsFile=/dev/null",
-        "-p", port,
-    }
-    if os.Getenv("DAGGER_SSHFS_DEBUG") == "1" {
-        args = append(args, "-o", "sshfs_debug", "-o", "loglevel=DEBUG3")
-    }
+	args := []string{
+		sshfsEndpoint,
+		mp,
+		"-o", fmt.Sprintf("IdentityFile=%s", privateKeyPath),
+		"-o", "IdentitiesOnly=yes",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-p", port,
+	}
+	if os.Getenv("DAGGER_SSHFS_DEBUG") == "1" {
+		args = append(args, "-o", "sshfs_debug", "-o", "loglevel=DEBUG3")
+	}
 
-    logrus.WithFields(logrus.Fields{
-        "id":       id,
-        "endpoint": sshfsEndpoint,
-        "port":     port,
-        "mountPath": mp,
-        "args":     args,
-    }).Info("sshfs: mounting")
+	logrus.WithFields(logrus.Fields{
+		"id":        id,
+		"endpoint":  sshfsEndpoint,
+		"port":      port,
+		"mountPath": mp,
+		"args":      args,
+	}).Info("sshfs: mounting")
 
-    cmd := exec.CommandContext(ctx, "sshfs", args...)
-    if os.Getenv("DAGGER_SSHFS_DEBUG") == "1" {
-        cmd.Stdout = os.Stdout
-    }
-    var stderr bytes.Buffer
-    cmd.Stderr = &stderr
-    if err := cmd.Start(); err != nil {
-        return "", "", fmt.Errorf("sshfs start failed (endpoint=%s): %v: %s", sshfsEndpoint, err, stderr.String())
-    }
+	cmd := exec.CommandContext(ctx, "sshfs", args...)
+	if os.Getenv("DAGGER_SSHFS_DEBUG") == "1" {
+		cmd.Stdout = os.Stdout
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return "", "", fmt.Errorf("sshfs start failed (endpoint=%s): %v: %s", sshfsEndpoint, err, stderr.String())
+	}
 
-    deadline := time.Now().Add(20 * time.Second)
-    mounted := false
-    for !mounted && time.Now().Before(deadline) {
-        if ctx.Err() != nil {
-            _ = cmd.Process.Kill()
-            return "", "", fmt.Errorf("context canceled while waiting for sshfs mount: %w", ctx.Err())
-        }
-        if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
-            _ = cmd.Wait()
-            return "", "", fmt.Errorf("sshfs exited early (endpoint=%s): %s", sshfsEndpoint, stderr.String())
-        }
-        if isMounted(mp) {
-            mounted = true
-            break
-        }
-        time.Sleep(150 * time.Millisecond)
-    }
-    if !mounted {
-        _ = cmd.Process.Kill()
-        _ = cmd.Wait()
-        return "", "", fmt.Errorf("sshfs mount readiness timeout (endpoint=%s): %s", sshfsEndpoint, stderr.String())
-    }
+	deadline := time.Now().Add(20 * time.Second)
+	mounted := false
+	for !mounted && time.Now().Before(deadline) {
+		if ctx.Err() != nil {
+			_ = cmd.Process.Kill()
+			return "", "", fmt.Errorf("context canceled while waiting for sshfs mount: %w", ctx.Err())
+		}
+		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+			_ = cmd.Wait()
+			return "", "", fmt.Errorf("sshfs exited early (endpoint=%s): %s", sshfsEndpoint, stderr.String())
+		}
+		if isMounted(mp) {
+			mounted = true
+			break
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if !mounted {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return "", "", fmt.Errorf("sshfs mount readiness timeout (endpoint=%s): %s", sshfsEndpoint, stderr.String())
+	}
 
-    go func(pid int) {
-        if err := cmd.Wait(); err != nil {
-            logrus.WithFields(logrus.Fields{"id": id, "pid": pid, "err": err}).Warn("sshfs process exited with error")
-        } else if os.Getenv("DAGGER_SSHFS_DEBUG") == "1" {
-            logrus.WithFields(logrus.Fields{"id": id, "pid": pid}).Debug("sshfs process exited")
-        }
-    }(cmd.Process.Pid)
+	go func(pid int) {
+		if err := cmd.Wait(); err != nil {
+			logrus.WithFields(logrus.Fields{"id": id, "pid": pid, "err": err}).Warn("sshfs process exited with error")
+		} else if os.Getenv("DAGGER_SSHFS_DEBUG") == "1" {
+			logrus.WithFields(logrus.Fields{"id": id, "pid": pid}).Debug("sshfs process exited")
+		}
+	}(cmd.Process.Pid)
 
-    mount := &sshfsMount{id: id, endpoint: sshfsEndpoint, mountPath: mp, refCount: 1, proc: cmd.Process}
-    m.mounts[id] = mount
-    logrus.WithFields(logrus.Fields{
-        "id":        id,
-        "endpoint":  sshfsEndpoint,
-        "mountPath": mp,
-    }).Info("sshfs: mounted")
-    return id, mp, nil
+	mount := &sshfsMount{id: id, endpoint: sshfsEndpoint, mountPath: mp, refCount: 1, proc: cmd.Process}
+	m.mounts[id] = mount
+	logrus.WithFields(logrus.Fields{
+		"id":        id,
+		"endpoint":  sshfsEndpoint,
+		"mountPath": mp,
+	}).Info("sshfs: mounted")
+	return id, mp, nil
 }
 
 // parseSSHEndpoint accepts either scp-style user@host[:port][/path] or ssh://user@host[:port]/path
