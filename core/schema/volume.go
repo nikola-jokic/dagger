@@ -15,9 +15,9 @@ var _ SchemaResolvers = &volumeSchema{}
 func (s *volumeSchema) Install(srv *dagql.Server) {
 	dagql.Fields[*core.Query]{
 		dagql.NodeFunc("sshfsVolume", s.sshfsVolume).
-			Doc("Create or retrieve an engine-managed SSHFS volume").
+			Doc("Create or retrieve an engine-managed SSHFS volume. Endpoint must be a parseable SSH URL, e.g. 'ssh://user@host:2222/path'.").
 			Args(
-				dagql.Arg("endpoint").Doc("The SSH endpoint to connect to (e.g., 'user@host:port')"),
+				dagql.Arg("endpoint").Doc("SSH endpoint URL, e.g. ssh://user@host[:port]/absolute/path"),
 				dagql.Arg("privateKey").Doc("The private key to use for authentication"),
 				dagql.Arg("publicKey").Doc("The public key to use for authentication"),
 			),
