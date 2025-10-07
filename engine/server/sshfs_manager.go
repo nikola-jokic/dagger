@@ -1,14 +1,11 @@
 package server
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
-	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -76,109 +73,104 @@ func (m *sshfsManager) ensureMounted(ctx context.Context, endpoint string, priva
 		return "", "", fmt.Errorf("failed to create mount dir: %w", err)
 	}
 
-	// Dynamic host candidate enrichment (no active SSH probing here).
-	originalHost := host
-	candidates := dynamicHostCandidates(host)
-	if len(candidates) == 0 { // fallback safety
-		candidates = []string{host}
-	}
+    sshfsEndpoint := fmt.Sprintf("%s@%s:%s", user, host, remotePath)
 
-	var lastErr error
-	var sshfsEndpoint string
-	// We'll attempt mount sequentially for each candidate host until success.
-	for _, cand := range candidates {
-		sshfsEndpoint = fmt.Sprintf("%s@%s:%s", user, cand, remotePath)
-		// Build args once per candidate; mount attempts happen later.
-		portStr := port
-		_ = portStr // keep naming consistent; port already string
-		// Assemble arguments below after candidate loop; we attempt inside process start section.
-		// We'll duplicate minimal code for clarity; break on success.
-		args := []string{
-			sshfsEndpoint,
-			// mount path placeholder; will reuse mp constant
-			mp,
-			"-o", fmt.Sprintf("IdentityFile=%s", privateKeyPath),
-			"-o", "IdentitiesOnly=yes",
-			"-o", "StrictHostKeyChecking=no",
-			"-o", "UserKnownHostsFile=/dev/null",
-			"-p", port,
-		}
-		if os.Getenv("DAGGER_SSHFS_DEBUG") == "1" {
-			args = append(args, "-o", "sshfs_debug", "-o", "loglevel=DEBUG3")
-		}
-		if st, err := os.Stat("/dev/fuse"); err != nil || (st.Mode()&os.ModeDevice) == 0 {
-			return "", "", fmt.Errorf("/dev/fuse not available inside engine container: %w", err)
-		}
-		logrus.WithFields(logrus.Fields{
-			"id":            id,
-			"endpoint":      sshfsEndpoint,
-			"port":          port,
-			"mountPath":     mp,
-			"args":          args,
-			"originalHost":  originalHost,
-			"candidateHost": cand,
-		}).Info("sshfs: mounting")
+    // Optional SSH connectivity probe (fast failure instead of waiting for sshfs to hang)
+    probeAttempts := 5
+    var probeErr error
+    for i := 0; i < probeAttempts; i++ {
+        // BatchMode + strict host key off for test/ephemeral usage
+        cmd := exec.CommandContext(ctx, "ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "BatchMode=yes", "-i", privateKeyPath, "-p", port, fmt.Sprintf("%s@%s", user, host), "true")
+        if err := cmd.Run(); err == nil {
+            probeErr = nil
+            break
+        } else {
+            probeErr = err
+            select {
+            case <-ctx.Done():
+                return "", "", fmt.Errorf("context canceled during ssh probe: %w", ctx.Err())
+            case <-time.After(250 * time.Millisecond):
+            }
+        }
+    }
+    if probeErr != nil {
+        return "", "", fmt.Errorf("ssh connectivity probe failed (host=%s port=%s): %w", host, port, probeErr)
+    }
 
-		cmd := exec.CommandContext(ctx, "sshfs", args...)
-		if os.Getenv("DAGGER_SSHFS_DEBUG") == "1" {
-			cmd.Stdout = os.Stdout
-		}
-		var stderr bytes.Buffer
-		cmd.Stderr = &stderr
-		if err := cmd.Start(); err != nil {
-			lastErr = fmt.Errorf("sshfs start failed for candidate %s: %v: %s", cand, err, stderr.String())
-			continue
-		}
-		// readiness polling for mountpoint only (no SSH probing)
-		deadline := time.Now().Add(20 * time.Second)
-		mounted := false
-		for !mounted && time.Now().Before(deadline) {
-			if ctx.Err() != nil {
-				_ = cmd.Process.Kill()
-				return "", "", fmt.Errorf("context canceled while waiting for sshfs mount: %w", ctx.Err())
-			}
-			if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
-				_ = cmd.Wait()
-				lastErr = fmt.Errorf("sshfs exited early for candidate %s: %s", cand, stderr.String())
-				break
-			}
-			if isMounted(mp) {
-				mounted = true
-				break
-			}
-			time.Sleep(150 * time.Millisecond)
-		}
-		if !mounted {
-			_ = cmd.Process.Kill()
-			_ = cmd.Wait()
-			if lastErr == nil { // ensure we have an error recorded
-				lastErr = fmt.Errorf("sshfs mount readiness timeout for candidate %s: %s", cand, stderr.String())
-			}
-			// try next candidate
-			continue
-		}
-		// success
-		go func(pid int, c string) {
-			if err := cmd.Wait(); err != nil {
-				logrus.WithFields(logrus.Fields{"id": id, "pid": pid, "candidateHost": c, "err": err}).Warn("sshfs process exited with error")
-			} else if os.Getenv("DAGGER_SSHFS_DEBUG") == "1" {
-				logrus.WithFields(logrus.Fields{"id": id, "pid": pid, "candidateHost": c}).Debug("sshfs process exited")
-			}
-		}(cmd.Process.Pid, cand)
-		mount := &sshfsMount{id: id, endpoint: sshfsEndpoint, mountPath: mp, refCount: 1, proc: cmd.Process}
-		m.mounts[id] = mount
-		logrus.WithFields(logrus.Fields{
-			"id":         id,
-			"endpoint":   sshfsEndpoint,
-			"mountPath":  mp,
-			"chosenHost": cand,
-		}).Info("sshfs: mounted")
-		return id, mp, nil
-	}
-	if lastErr == nil {
-		lastErr = errors.New("no candidates attempted")
-	}
-	return "", "", lastErr
+    if st, err := os.Stat("/dev/fuse"); err != nil || (st.Mode()&os.ModeDevice) == 0 {
+        return "", "", fmt.Errorf("/dev/fuse not available inside engine container: %w", err)
+    }
+
+    args := []string{
+        sshfsEndpoint,
+        mp,
+        "-o", fmt.Sprintf("IdentityFile=%s", privateKeyPath),
+        "-o", "IdentitiesOnly=yes",
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null",
+        "-p", port,
+    }
+    if os.Getenv("DAGGER_SSHFS_DEBUG") == "1" {
+        args = append(args, "-o", "sshfs_debug", "-o", "loglevel=DEBUG3")
+    }
+
+    logrus.WithFields(logrus.Fields{
+        "id":       id,
+        "endpoint": sshfsEndpoint,
+        "port":     port,
+        "mountPath": mp,
+        "args":     args,
+    }).Info("sshfs: mounting")
+
+    cmd := exec.CommandContext(ctx, "sshfs", args...)
+    if os.Getenv("DAGGER_SSHFS_DEBUG") == "1" {
+        cmd.Stdout = os.Stdout
+    }
+    var stderr bytes.Buffer
+    cmd.Stderr = &stderr
+    if err := cmd.Start(); err != nil {
+        return "", "", fmt.Errorf("sshfs start failed (endpoint=%s): %v: %s", sshfsEndpoint, err, stderr.String())
+    }
+
+    deadline := time.Now().Add(20 * time.Second)
+    mounted := false
+    for !mounted && time.Now().Before(deadline) {
+        if ctx.Err() != nil {
+            _ = cmd.Process.Kill()
+            return "", "", fmt.Errorf("context canceled while waiting for sshfs mount: %w", ctx.Err())
+        }
+        if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+            _ = cmd.Wait()
+            return "", "", fmt.Errorf("sshfs exited early (endpoint=%s): %s", sshfsEndpoint, stderr.String())
+        }
+        if isMounted(mp) {
+            mounted = true
+            break
+        }
+        time.Sleep(150 * time.Millisecond)
+    }
+    if !mounted {
+        _ = cmd.Process.Kill()
+        _ = cmd.Wait()
+        return "", "", fmt.Errorf("sshfs mount readiness timeout (endpoint=%s): %s", sshfsEndpoint, stderr.String())
+    }
+
+    go func(pid int) {
+        if err := cmd.Wait(); err != nil {
+            logrus.WithFields(logrus.Fields{"id": id, "pid": pid, "err": err}).Warn("sshfs process exited with error")
+        } else if os.Getenv("DAGGER_SSHFS_DEBUG") == "1" {
+            logrus.WithFields(logrus.Fields{"id": id, "pid": pid}).Debug("sshfs process exited")
+        }
+    }(cmd.Process.Pid)
+
+    mount := &sshfsMount{id: id, endpoint: sshfsEndpoint, mountPath: mp, refCount: 1, proc: cmd.Process}
+    m.mounts[id] = mount
+    logrus.WithFields(logrus.Fields{
+        "id":        id,
+        "endpoint":  sshfsEndpoint,
+        "mountPath": mp,
+    }).Info("sshfs: mounted")
+    return id, mp, nil
 }
 
 // parseSSHEndpoint accepts either scp-style user@host[:port][/path] or ssh://user@host[:port]/path
@@ -246,77 +238,7 @@ func parseSSHEndpoint(ep string) (string, string, string, string, error) {
 // dynamicHostCandidates returns possible host substitutions when original is loopback.
 // It collects values from env DAGGER_SSHFS_HOST_CANDIDATES (comma-separated) and
 // auto-detects default gateway via /proc/net/route (Linux) as a last resort.
-func dynamicHostCandidates(host string) []string {
-	candidates := []string{host}
-	if !(host == "127.0.0.1" || host == "localhost" || strings.HasPrefix(host, "127.")) {
-		return candidates
-	}
-	seen := map[string]struct{}{host: {}}
-	// env provided
-	if extra := os.Getenv("DAGGER_SSHFS_HOST_CANDIDATES"); extra != "" {
-		for _, part := range strings.Split(extra, ",") {
-			p := strings.TrimSpace(part)
-			if p == "" {
-				continue
-			}
-			if _, ok := seen[p]; !ok {
-				candidates = append(candidates, p)
-				seen[p] = struct{}{}
-			}
-		}
-	}
-	// attempt default gateway detection from /proc/net/route
-	if gw, err := detectLinuxGateway(); err == nil && gw != "" {
-		if _, ok := seen[gw]; !ok {
-			candidates = append(candidates, gw)
-			seen[gw] = struct{}{}
-		}
-	}
-	return candidates
-}
-
-func detectLinuxGateway() (string, error) {
-	f, err := os.Open("/proc/net/route")
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	// Format: Iface Destination Gateway Flags ... (tab separated)
-	scanner := bufio.NewScanner(f)
-	// skip header
-	if !scanner.Scan() {
-		return "", fmt.Errorf("empty route file")
-	}
-	for scanner.Scan() {
-		line := scanner.Text()
-		fields := strings.Fields(line)
-		if len(fields) < 3 {
-			continue
-		}
-		destHex := fields[1]
-		gwHex := fields[2]
-		if destHex == "00000000" && gwHex != "00000000" { // default route
-			// hex is little-endian
-			if len(gwHex) != 8 {
-				continue
-			}
-			// parse bytes
-			b1, _ := strconv.ParseInt(gwHex[6:8], 16, 0)
-			b2, _ := strconv.ParseInt(gwHex[4:6], 16, 0)
-			b3, _ := strconv.ParseInt(gwHex[2:4], 16, 0)
-			b4, _ := strconv.ParseInt(gwHex[0:2], 16, 0)
-			ip := fmt.Sprintf("%d.%d.%d.%d", b1, b2, b3, b4)
-			// basic sanity
-			if net.ParseIP(ip) != nil {
-				return ip, nil
-			}
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return "", err
-	}
-	return "", fmt.Errorf("gateway not found")
-}
+// dynamic host resolution removed: engine now trusts the provided host directly.
 
 // isMounted checks /proc/self/mountinfo for the given mount point path.
 func isMounted(mountPath string) bool {
