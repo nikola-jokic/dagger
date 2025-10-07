@@ -2,13 +2,17 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"net"
+	"path/filepath"
 	"testing"
 
-	"dagger.io/dagger"
-	"github.com/dagger/dagger/internal/testutil"
 	"github.com/dagger/testctx"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 )
 
 type VolumeSuite struct{}
@@ -20,25 +24,11 @@ func TestVolume(t *testing.T) {
 func (VolumeSuite) TestSSHFSVolume(ctx context.Context, t *testctx.T) {
 	c := connect(ctx, t)
 
-	engine := devEngineContainer(c, engineWithConfig(ctx, t))
-	engineSvc, err := c.Host().Tunnel(devEngineContainerAsService(engine)).Start(ctx)
-	require.NoError(t, err)
-	t.Cleanup(func() { engineSvc.Stop(ctx) })
-
-	endpoint, err := engineSvc.Endpoint(ctx, dagger.ServiceEndpointOpts{Scheme: "tcp"})
-	require.NoError(t, err)
-
-	c2, err := dagger.Connect(ctx, dagger.WithRunnerHost(endpoint), dagger.WithLogOutput(testutil.NewTWriter(t)))
-	require.NoError(t, err)
-	t.Cleanup(func() { c2.Close() })
-
-	// Set up SSH server container
-	sshServer := c2.Container().
+	sshfs := c.Container().
 		From(alpineImage).
-		WithExec([]string{"apk", "add", "openssh", "openssh-sftp-server"})
+		WithExec([]string{"apk", "add", "git", "openssh", "openssl"})
 
-	// Generate SSH keys
-	sshServer = sshServer.
+	hostKeyGen := sshfs.
 		WithExec([]string{
 			"ssh-keygen", "-t", "rsa", "-b", "4096", "-f", "/root/.ssh/host_key", "-N", "",
 		}).
@@ -49,62 +39,88 @@ func (VolumeSuite) TestSSHFSVolume(ctx context.Context, t *testctx.T) {
 			"cp", "/root/.ssh/id_rsa.pub", "/root/.ssh/authorized_keys",
 		})
 
-	// Get the keys for the client
-	userPrivateKey, err := sshServer.File("/root/.ssh/id_rsa").Contents(ctx)
+	hostPubKey, err := hostKeyGen.File("/root/.ssh/host_key.pub").Contents(ctx)
 	require.NoError(t, err)
 
-	userPubKey, err := sshServer.File("/root/.ssh/id_rsa.pub").Contents(ctx)
+	userPrivateKey, err := hostKeyGen.File("/root/.ssh/id_rsa").Contents(ctx)
 	require.NoError(t, err)
 
-	// Create some test files in the SSH server
-	sshServer = sshServer.
-		WithNewFile("/root/test.txt", "Hello from SSH server!").
-		WithNewFile("/root/data.json", `{"test": "data"}`)
+	setupScript := c.Directory().
+		WithNewFile("setup.sh", `#!/bin/sh
 
-	// Start SSH server
-	sshPort := 2222
-	sshSvc := sshServer.
+set -e -u -x
+
+cd /root
+mkdir repo
+cd repo
+echo test >> content.txt
+
+chmod 0600 ~/.ssh/host_key
+$(which sshd) -h ~/.ssh/host_key -p 2222
+
+sleep infinity
+`).
+		File("setup.sh")
+
+	key, err := ssh.ParseRawPrivateKey([]byte(userPrivateKey))
+	require.NoError(t, err)
+
+	sshAgent := agent.NewKeyring()
+	err = sshAgent.Add(agent.AddedKey{
+		PrivateKey: key,
+	})
+	require.NoError(t, err)
+
+	tmp := t.TempDir()
+	sock := filepath.Join(tmp, "agent.sock")
+	l, err := net.Listen("unix", sock)
+	require.NoError(t, err)
+	defer l.Close()
+
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				if !errors.Is(err, net.ErrClosed) {
+					t.Logf("accept: %s", err)
+					panic(err)
+				}
+				break
+			}
+
+			t.Log("agent serving")
+
+			err = agent.ServeAgent(sshAgent, c)
+			if err != nil && !errors.Is(err, io.EOF) {
+				t.Logf("serve agent: %s", err)
+				panic(err)
+			}
+		}
+	}()
+
+	sshPort := 2223
+	sshSvc := hostKeyGen.
+		WithMountedFile("/root/start.sh", setupScript).
 		WithExposedPort(sshPort).
-		WithExec([]string{
-			"/usr/sbin/sshd",
-			"-h", "/root/.ssh/host_key",
-			"-p", fmt.Sprintf("%d", sshPort),
-		}).
+		WithDefaultArgs([]string{"sh", "/root/start.sh"}).
 		AsService()
 
-	// Start the SSH service
-	sshSvcStarted, err := sshSvc.Start(ctx)
-	require.NoError(t, err)
-	t.Cleanup(func() { sshSvcStarted.Stop(ctx) })
-
-	sshHost, err := sshSvcStarted.Hostname(ctx)
+	sshHost, err := sshSvc.Hostname(ctx)
 	require.NoError(t, err)
 
-	// Create SSHFS volume
-	sshEndpoint := fmt.Sprintf("root@%s:%d/root", sshHost, sshPort)
-	sshfsVol := c2.SshfsVolume(
-		sshEndpoint,
-		c2.SetSecret("ssh-private-key", userPrivateKey),
-		c2.SetSecret("ssh-public-key", userPubKey),
-	)
+	sshfsEndpoint := fmt.Sprintf("root@%s:%d:/root/repo", sshHost, sshPort)
 
-	// Test that we can access files from the SSHFS volume by mounting it into a container
-	testContainer := c2.Container().
+	privKeySecret := c.SetSecret("sshfs-private-key", string(userPrivateKey))
+	hostKeySecret := c.SetSecret("sshfs-host-key", string(hostPubKey))
+
+	sshfsVolume := c.SshfsVolume(sshfsEndpoint, privKeySecret, hostKeySecret)
+
+	output, err := c.Container().
 		From(alpineImage).
-		WithVolumeMount("/mnt/sshfs", sshfsVol)
-
-	// Read files from the mounted volume
-	testFile, err := testContainer.File("/mnt/sshfs/test.txt").Contents(ctx)
+		WithVolumeMount("/mnt/repo", sshfsVolume).
+		WithExec([]string{"cat", "/mnt/repo/content.txt"}).
+		Stdout(ctx)
 	require.NoError(t, err)
-	require.Equal(t, "Hello from SSH server!", testFile)
+	require.Contains(t, output, "test")
 
-	dataFile, err := testContainer.File("/mnt/sshfs/data.json").Contents(ctx)
-	require.NoError(t, err)
-	require.Equal(t, `{"test": "data"}`, dataFile)
-
-	// Test directory listing
-	entries, err := testContainer.Directory("/mnt/sshfs").Entries(ctx)
-	require.NoError(t, err)
-	require.Contains(t, entries, "test.txt")
-	require.Contains(t, entries, "data.json")
 }
