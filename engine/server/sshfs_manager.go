@@ -111,14 +111,17 @@ func (m *sshfsManager) ensureMounted(ctx context.Context, endpoint string, priva
 	args := []string{
 		sshfsEndpoint,
 		mp,
+		"-f", // foreground mode - don't daemonize, stay attached
 		"-o", fmt.Sprintf("IdentityFile=%s", privateKeyPath),
 		"-o", "IdentitiesOnly=yes",
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "reconnect", // automatically reconnect on connection loss
+		"-o", "ServerAliveInterval=15", // send keepalive every 15s
 		"-p", parsed.port,
 	}
 	if os.Getenv("DAGGER_SSHFS_DEBUG") == "1" {
-		args = append(args, "-o", "sshfs_debug", "-o", "loglevel=DEBUG3")
+		args = append(args, "-o", "sshfs_debug", "-o", "loglevel=DEBUG3", "-d") // -d for debug mode
 	}
 
 	logrus.WithFields(logrus.Fields{
@@ -129,26 +132,36 @@ func (m *sshfsManager) ensureMounted(ctx context.Context, endpoint string, priva
 		"args":      args,
 	}).Info("sshfs: mounting")
 
-	cmd := exec.CommandContext(ctx, "sshfs", args...)
-	if os.Getenv("DAGGER_SSHFS_DEBUG") == "1" {
-		cmd.Stdout = os.Stdout
-	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	// CRITICAL: Use background context so sshfs persists beyond the current GraphQL request
+	// The mount needs to live as long as the engine is running, not just this request
+	cmd := exec.CommandContext(context.Background(), "sshfs", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
-		return "", "", fmt.Errorf("sshfs start failed (endpoint=%s): %v: %s", sshfsEndpoint, err, stderr.String())
+		logrus.WithError(err).WithField("endpoint", sshfsEndpoint).Error("sshfs: start failed")
+		return "", "", fmt.Errorf("sshfs start failed (endpoint=%s): %w", sshfsEndpoint, err)
 	}
+
+	logrus.WithFields(logrus.Fields{
+		"id":  id,
+		"pid": cmd.Process.Pid,
+	}).Info("sshfs: process started")
 
 	deadline := time.Now().Add(20 * time.Second)
 	mounted := false
 	for !mounted && time.Now().Before(deadline) {
 		if ctx.Err() != nil {
 			_ = cmd.Process.Kill()
+			logrus.WithError(ctx.Err()).WithField("id", id).Error("sshfs: context canceled during mount wait")
 			return "", "", fmt.Errorf("context canceled while waiting for sshfs mount: %w", ctx.Err())
 		}
 		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
 			_ = cmd.Wait()
-			return "", "", fmt.Errorf("sshfs exited early (endpoint=%s): %s", sshfsEndpoint, stderr.String())
+			logrus.WithFields(logrus.Fields{
+				"id":       id,
+				"exitCode": cmd.ProcessState.ExitCode(),
+			}).Error("sshfs: process exited early")
+			return "", "", fmt.Errorf("sshfs exited early (endpoint=%s)", sshfsEndpoint)
 		}
 		if isMounted(mp) {
 			mounted = true
@@ -159,14 +172,26 @@ func (m *sshfsManager) ensureMounted(ctx context.Context, endpoint string, priva
 	if !mounted {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
-		return "", "", fmt.Errorf("sshfs mount readiness timeout (endpoint=%s): %s", sshfsEndpoint, stderr.String())
+		logrus.WithField("id", id).Error("sshfs: mount readiness timeout")
+		return "", "", fmt.Errorf("sshfs mount readiness timeout (endpoint=%s)", sshfsEndpoint)
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"id":        id,
+		"pid":       cmd.Process.Pid,
+		"mountPath": mp,
+	}).Info("sshfs: mount confirmed ready")
+
+	// Double-check the mount is accessible
+	if _, err := os.Stat(mp); err != nil {
+		logrus.WithError(err).WithField("mountPath", mp).Error("sshfs: mount path not accessible after successful mount")
 	}
 
 	go func(pid int) {
 		if err := cmd.Wait(); err != nil {
-			logrus.WithFields(logrus.Fields{"id": id, "pid": pid, "err": err}).Warn("sshfs process exited with error")
-		} else if os.Getenv("DAGGER_SSHFS_DEBUG") == "1" {
-			logrus.WithFields(logrus.Fields{"id": id, "pid": pid}).Debug("sshfs process exited")
+			logrus.WithFields(logrus.Fields{"id": id, "pid": pid, "err": err}).Error("sshfs: process exited with error - MOUNT WILL BE DISCONNECTED")
+		} else {
+			logrus.WithFields(logrus.Fields{"id": id, "pid": pid}).Error("sshfs: process exited cleanly - MOUNT WILL BE DISCONNECTED")
 		}
 	}(cmd.Process.Pid)
 

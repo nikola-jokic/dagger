@@ -55,7 +55,8 @@ set -e -u -x
 cd /root
 mkdir -p repo
 cd repo
-echo test >> content.txt
+# Prepare the initial content inside the test.txt
+echo test >> test.txt
 
 # Harden and enable key auth
 sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
@@ -160,7 +161,7 @@ sleep infinity
 	hostKeySecret := c.SetSecret("sshfs-public-key", string(userPublicKey))
 
 	// readiness: attempt a few ssh connections before proceeding so sshfs mount won't race
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		probe := c.Container().
 			From(alpineImage).
 			WithServiceBinding("ssh", sshSvc).
@@ -170,20 +171,40 @@ sleep infinity
 		if perr == nil && strings.Contains(probeOut, "ok") {
 			break
 		}
-		time.Sleep(500 * time.Millisecond)
 		if i == 9 {
 			t.Logf("ssh readiness probe failed after retries; last output: %s", probeOut)
+			break
 		}
+		time.Sleep(500 * time.Millisecond)
 	}
 
 	sshfsVolume := c.SshfsVolume(sshfsEndpoint, privKeySecret, hostKeySecret)
 
+	// Ensure that the initial content is available to the first container using the volume
 	output, err := c.Container().
 		From(alpineImage).
 		WithVolumeMount("/mnt/repo", sshfsVolume).
-		WithExec([]string{"cat", "/mnt/repo/content.txt"}).
+		WithExec([]string{"cat", "/mnt/repo/test.txt"}).
 		Stdout(ctx)
 	require.NoError(t, err)
 	require.Contains(t, output, "test")
 
+	// Write some content to the sshfs volume and read it back in a new container
+	writeOut, err := c.Container().
+		From(alpineImage).
+		WithVolumeMount("/mnt/repo", sshfsVolume).
+		WithExec([]string{"sh", "-c", "echo 'other' > /mnt/repo/other.txt && cat /mnt/repo/other.txt"}).
+		Stdout(ctx)
+	require.NoError(t, err)
+	require.Contains(t, writeOut, "other")
+
+	// Read the content back in a new container to ensure persistence
+	output2, err := c.Container().
+		From(alpineImage).
+		WithVolumeMount("/mnt/repo", sshfsVolume).
+		WithExec([]string{"cat", "/mnt/repo/other.txt"}).
+		Stdout(ctx)
+	require.NoError(t, err)
+	t.Logf("Third container read shows: %q", strings.TrimSpace(output2))
+	require.Contains(t, output2, "other")
 }
