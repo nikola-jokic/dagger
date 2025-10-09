@@ -42,10 +42,17 @@ func newSSHFSManager(rootDir string) *sshfsManager {
 	}
 }
 
+type parsedSSHEndpoint struct {
+	user string
+	host string
+	port string
+	path string
+}
+
 // ensureMounted mounts the endpoint with sshfs using the provided private/public key files (paths)
 // and returns the mount id and local mount path.
 func (m *sshfsManager) ensureMounted(ctx context.Context, endpoint string, privateKeyPath, publicKeyPath string) (string, string, error) {
-	user, host, port, remotePath, err := parseSSHEndpoint(endpoint)
+	parsed, err := parseSSHEndpoint(endpoint)
 	if err != nil {
 		return "", "", fmt.Errorf("invalid sshfs endpoint %q: %w", endpoint, err)
 	}
@@ -73,14 +80,14 @@ func (m *sshfsManager) ensureMounted(ctx context.Context, endpoint string, priva
 		return "", "", fmt.Errorf("failed to create mount dir: %w", err)
 	}
 
-	sshfsEndpoint := fmt.Sprintf("%s@%s:%s", user, host, remotePath)
+	sshfsEndpoint := fmt.Sprintf("%s@%s:%s", parsed.user, parsed.host, parsed.path)
 
 	// Optional SSH connectivity probe (fast failure instead of waiting for sshfs to hang)
 	probeAttempts := 5
 	var probeErr error
 	for i := 0; i < probeAttempts; i++ {
 		// BatchMode + strict host key off for test/ephemeral usage
-		cmd := exec.CommandContext(ctx, "ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "BatchMode=yes", "-i", privateKeyPath, "-p", port, fmt.Sprintf("%s@%s", user, host), "true")
+		cmd := exec.CommandContext(ctx, "ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "BatchMode=yes", "-i", privateKeyPath, "-p", parsed.port, fmt.Sprintf("%s@%s", parsed.user, parsed.host), "true")
 		if err := cmd.Run(); err == nil {
 			probeErr = nil
 			break
@@ -94,7 +101,7 @@ func (m *sshfsManager) ensureMounted(ctx context.Context, endpoint string, priva
 		}
 	}
 	if probeErr != nil {
-		return "", "", fmt.Errorf("ssh connectivity probe failed (host=%s port=%s): %w", host, port, probeErr)
+		return "", "", fmt.Errorf("ssh connectivity probe failed (host=%s port=%s): %w", parsed.host, parsed.port, probeErr)
 	}
 
 	if st, err := os.Stat("/dev/fuse"); err != nil || (st.Mode()&os.ModeDevice) == 0 {
@@ -108,7 +115,7 @@ func (m *sshfsManager) ensureMounted(ctx context.Context, endpoint string, priva
 		"-o", "IdentitiesOnly=yes",
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
-		"-p", port,
+		"-p", parsed.port,
 	}
 	if os.Getenv("DAGGER_SSHFS_DEBUG") == "1" {
 		args = append(args, "-o", "sshfs_debug", "-o", "loglevel=DEBUG3")
@@ -117,7 +124,7 @@ func (m *sshfsManager) ensureMounted(ctx context.Context, endpoint string, priva
 	logrus.WithFields(logrus.Fields{
 		"id":        id,
 		"endpoint":  sshfsEndpoint,
-		"port":      port,
+		"port":      parsed.port,
 		"mountPath": mp,
 		"args":      args,
 	}).Info("sshfs: mounting")
@@ -175,11 +182,11 @@ func (m *sshfsManager) ensureMounted(ctx context.Context, endpoint string, priva
 
 // parseSSHEndpoint accepts either scp-style user@host[:port][/path] or ssh://user@host[:port]/path
 // Returns user, host, port (string), path, error.
-func parseSSHEndpoint(ep string) (string, string, string, string, error) {
+func parseSSHEndpoint(ep string) (parsedSSHEndpoint, error) {
 	if strings.HasPrefix(ep, "ssh://") {
 		u, err := url.Parse(ep)
 		if err != nil {
-			return "", "", "", "", err
+			return parsedSSHEndpoint{}, fmt.Errorf("invalid sshfs endpoint %q: %w", ep, err)
 		}
 		user := u.User.Username()
 		host := u.Hostname()
@@ -192,20 +199,20 @@ func parseSSHEndpoint(ep string) (string, string, string, string, error) {
 			p = "/"
 		}
 		if user == "" || host == "" {
-			return "", "", "", "", fmt.Errorf("missing user or host")
+			return parsedSSHEndpoint{}, fmt.Errorf("missing user or host")
 		}
-		return user, host, port, p, nil
+		return parsedSSHEndpoint{user: user, host: host, port: port, path: p}, nil
 	}
 	// scp style: user@host:port/path OR user@host:/path OR user@host/path
 	// First split user@rest
 	atIdx := strings.Index(ep, "@")
 	if atIdx < 0 {
-		return "", "", "", "", fmt.Errorf("missing '@'")
+		return parsedSSHEndpoint{}, fmt.Errorf("missing '@'")
 	}
 	user := ep[:atIdx]
 	hostRest := ep[atIdx+1:]
 	if user == "" {
-		return "", "", "", "", fmt.Errorf("empty user")
+		return parsedSSHEndpoint{}, fmt.Errorf("empty user")
 	}
 	// path part starts at first ':' followed by '/' or first '/'.
 	var hostPart, pathPart string
@@ -230,9 +237,9 @@ func parseSSHEndpoint(ep string) (string, string, string, string, error) {
 		}
 	}
 	if hostPart == "" {
-		return "", "", "", "", fmt.Errorf("empty host")
+		return parsedSSHEndpoint{}, fmt.Errorf("empty host")
 	}
-	return user, hostPart, port, pathPart, nil
+	return parsedSSHEndpoint{user: user, host: hostPart, port: port, path: pathPart}, nil
 }
 
 // dynamicHostCandidates returns possible host substitutions when original is loopback.
