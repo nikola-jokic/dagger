@@ -536,7 +536,7 @@ func SourceMap(filename string, line int, column int) *dagger.SourceMap {
 	return client.SourceMap(filename, line, column)
 }
 
-// Create or retrieve an engine-managed SSHFS volume
+// Create or retrieve an engine-managed SSHFS volume. Endpoint must be a parseable SSH URL, e.g. 'ssh://user@host:2222/path'.
 func SshfsVolume(endpoint string, privateKey *dagger.Secret, publicKey *dagger.Secret) *dagger.Volume {
 	client := initClient()
 	return client.SshfsVolume(endpoint, privateKey, publicKey)

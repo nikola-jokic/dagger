@@ -10843,7 +10843,7 @@ func (r *Client) SourceMap(filename string, line int, column int) *SourceMap {
 	}
 }
 
-// Create or retrieve an engine-managed SSHFS volume
+// Create or retrieve an engine-managed SSHFS volume. Endpoint must be a parseable SSH URL, e.g. 'ssh://user@host:2222/path'.
 func (r *Client) SshfsVolume(endpoint string, privateKey *Secret, publicKey *Secret) *Volume {
 	assertNotNil("privateKey", privateKey)
 	assertNotNil("publicKey", publicKey)
