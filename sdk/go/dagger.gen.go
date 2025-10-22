@@ -880,9 +880,10 @@ func (r *CacheVolume) MarshalJSON() ([]byte, error) {
 type Changeset struct {
 	query *querybuilder.Selection
 
-	export *string
-	id     *ChangesetID
-	sync   *ChangesetID
+	export  *string
+	id      *ChangesetID
+	isEmpty *bool
+	sync    *ChangesetID
 }
 
 func (r *Changeset) WithGraphQLQuery(q *querybuilder.Selection) *Changeset {
@@ -980,6 +981,19 @@ func (r *Changeset) MarshalJSON() ([]byte, error) {
 		return nil, err
 	}
 	return json.Marshal(id)
+}
+
+// Returns true if the changeset is empty (i.e. there are no changes).
+func (r *Changeset) IsEmpty(ctx context.Context) (bool, error) {
+	if r.isEmpty != nil {
+		return *r.isEmpty, nil
+	}
+	q := r.query.Select("isEmpty")
+
+	var response bool
+
+	q = q.Bind(&response)
+	return response, q.Execute(ctx)
 }
 
 // Return a snapshot containing only the created and modified files
