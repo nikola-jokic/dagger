@@ -3874,7 +3874,8 @@ func (r *Directory) WithoutFiles(paths []string) *Directory {
 type Engine struct {
 	query *querybuilder.Selection
 
-	id *EngineID
+	id   *EngineID
+	name *string
 }
 
 func (r *Engine) WithGraphQLQuery(q *querybuilder.Selection) *Engine {
@@ -3930,6 +3931,19 @@ func (r *Engine) LocalCache() *EngineCache {
 	return &EngineCache{
 		query: q,
 	}
+}
+
+// The name of the engine instance.
+func (r *Engine) Name(ctx context.Context) (string, error) {
+	if r.name != nil {
+		return *r.name, nil
+	}
+	q := r.query.Select("name")
+
+	var response string
+
+	q = q.Bind(&response)
+	return response, q.Execute(ctx)
 }
 
 // A cache storage for the Dagger engine
